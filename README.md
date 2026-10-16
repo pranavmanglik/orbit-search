@@ -35,7 +35,7 @@ The input models reject provider query languages and bound page size to 100 and 
 `SearchOperationError` provides a bounded public message and explicit retry hint. Adapters must not
 place credentials, provider response bodies, or raw SDK exception text in those messages.
 
-This package is pre-alpha and is not a published or stable release. It supports Python 3.11 through
+This package is in alpha and is not a published or stable release. It supports Python 3.11 through
 3.14.
 
 ## Documentation

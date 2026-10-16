@@ -33,6 +33,7 @@ from pydantic import (
     field_validator,
 )
 
+# Stable Core container key used by applications that register a SearchStore capability.
 SEARCH_STORE_DEPENDENCY_KEY = "orbit.search"
 _MAX_QUERY_TEXT = 2_048
 _MAX_FIELDS = 64
@@ -112,7 +113,10 @@ class SearchQuery(BaseModel):
     """Bounded full-text query with exact-match scalar filters and opaque pagination cursor.
 
     The contract deliberately excludes provider-specific query DSL. Adapters must translate the
-    text, selected fields, exact filters, and cursor using parameterized provider APIs.
+    text, selected fields, exact filters, and cursor using parameterized provider APIs. The caller
+    chooses the fields to search and return; the contract does not define ranking, tenant isolation,
+    stemming, fuzzy matching, or provider-side defaults. Cursors are opaque and only meaningful to
+    the adapter that produced them.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid", strict=True, hide_input_in_errors=True)
@@ -188,7 +192,12 @@ class SearchQuery(BaseModel):
 
 
 class SearchHit(BaseModel):
-    """One immutable result with provider-neutral identifier, finite score, and JSON source."""
+    """One immutable result with provider-neutral identifier, finite score, and JSON source.
+
+    ``score`` is provider-defined and should only be compared within results from the same backend
+    and query. ``source`` is a detached, recursively immutable JSON object; use ``model_dump()`` to
+    obtain ordinary JSON-compatible containers.
+    """
 
     model_config = ConfigDict(frozen=True, extra="forbid", strict=True, hide_input_in_errors=True)
 
@@ -240,7 +249,12 @@ class SearchHit(BaseModel):
 
 
 class SearchPage(BaseModel):
-    """One bounded page of results and its opaque continuation cursor, if any."""
+    """One bounded page of results and its opaque continuation cursor, if any.
+
+    Adapters return at most the requested page size and provide ``next_cursor`` only when another
+    page is available. ``took_ms`` is the provider-reported elapsed duration for this operation; it
+    excludes application-side processing and transport time unless the adapter documents otherwise.
+    """
 
     model_config = ConfigDict(frozen=True, extra="forbid", strict=True, hide_input_in_errors=True)
 
@@ -283,9 +297,17 @@ class SearchStore(Protocol):
     """Provider-neutral asynchronous search contract implemented by optional adapters.
 
     Each adapter owns its client, credentials, transport timeouts, connection lifecycle, and
-    provider error mapping. Cancellation must propagate to the underlying request; adapters must
-    not retry automatically unless the provider operation is known to be safe.
+    provider error mapping. Implementations must validate collection names with
+    :func:`validate_collection_name`, preserve the caller's explicit filters, and avoid silently
+    widening the query. Cancellation must propagate to the underlying request; adapters must not
+    retry automatically unless the provider operation is known to be safe. This protocol has no
+    lifecycle method, so applications close provider clients through the adapter's documented API.
     """
 
     async def search(self, collection: str, query: SearchQuery) -> SearchPage:
-        """Search one provider collection using explicit fields and bounded exact-match filters."""
+        """Search one collection with explicit fields, filters, page size, and optional cursor.
+
+        Raise :class:`SearchIndexNotFound` when the collection is absent and
+        :class:`SearchOperationError` for other normalized failures. Do not expose credentials,
+        document contents, or raw provider exception text through public errors.
+        """

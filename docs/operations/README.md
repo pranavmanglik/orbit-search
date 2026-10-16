@@ -1,55 +1,44 @@
-# Orbit Search: operations and security
+# Orbit Search: operations
 
-This guide organizes runtime behavior documented by the package. It does not certify production readiness. Verify provider/client versions, permissions, transport security, limits, and failure behavior in the target environment before release.
+`orbit-search` contains contracts and bounded data models only. It does not open network connections,
+manage a client pool, or provide an Elasticsearch, OpenSearch, or other search backend. Install a
+provider adapter separately and follow that adapter's connection, timeout, credential, and shutdown
+instructions.
 
-## Configuration surface
+## Query behavior
 
-Environment names found in the package README:
+Every `SearchQuery` has nonblank text, at least one explicit field, optional exact-match scalar
+filters, a page size from 1 through 100, and an optional opaque cursor. Provider adapters translate
+these values into their provider's parameterized query API. Provider query DSL is intentionally not
+accepted by the shared contract.
 
-The package README does not name `ORBIT_*` variables. Use its typed constructors and application configuration, and confirm exact runtime inputs in the implementation before deployment.
+`SearchPage` contains at most 100 `SearchHit` values, a nonnegative `took_ms`, and an optional
+continuation cursor. Cursors are provider-specific opaque tokens: pass them back only to the same
+adapter and compatible query, and do not parse, construct, or assume they remain valid after provider
+configuration or index changes. Provider ranking and score scales are not normalized by Orbit.
 
-Use the package README's constructor and deployment examples. Store credentials in a secret manager and avoid logging credentials, raw provider errors, request data, or opaque cursors.
+The contract does not impose retries or expose a close method. Configure connection and request
+timeouts, safe retry rules, concurrency limits, and client shutdown using the selected provider
+adapter. Cancellation should reach the provider request. `SearchOperationError.retryable` is an
+adapter's explicit hint; it is not a promise that retrying is safe or will succeed.
 
-## Lifecycle, failure behavior, and limits
+## Resource and payload bounds
 
-`orbit-search` defines a provider-neutral asynchronous search contract. It validates bounded text
-queries, explicit field paths, scalar exact-match filters, opaque pagination cursors, finite result
-scores, and size-limited JSON documents. It does not contain an Elasticsearch/OpenSearch client or
-claim a provider integration.
+Queries limit text to 2,048 characters, fields and filters to 64 entries each, cursor text to 4,096
+characters, and page size to 100. A source document is limited to 1 MiB, 16 nesting levels, 10,000
+values, and 1,000 object keys at each level. Search result payloads are copied and frozen before they
+are returned; `model_dump()` produces detached JSON-compatible values.
 
-Install the capability package:
+Collection names are portable identifiers of at most 255 characters. Field paths are explicit dotted
+identifiers. These checks prevent provider syntax from being smuggled through this contract; they do
+not replace provider authorization or application validation.
 
-```bash
-python -m pip install orbit-search
-```
+## Deployment checks
 
-Provider adapters implement `SearchStore` and own SDKs, credentials, configuration, transport,
-resource lifecycle, and provider error mapping. They should translate the portable query fields
-with parameterized provider APIs and document differences in ranking, consistency, and pagination.
-No provider DSL, query syntax, automatic retry, or close method is imposed on the shared contract.
+Before release, verify the chosen provider's supported version, TLS configuration, least-privilege
+permissions, client lifecycle, request timeouts, cancellation behavior, query translation, paging
+consistency, and behavior during provider outages. Exercise realistic document size and result volume.
+Test backup, restore, and index lifecycle through the provider-specific tooling where required.
 
-```python
-from orbit_search import SearchQuery, SearchStore
-
-
-async def find_articles(store: SearchStore):
-    query = SearchQuery(
-        text="async cancellation",
-        fields=("title", "body"),
-        filters={"visibility": "public"},
-        page_size=25,
-    )
-    return await store.search("articles", query)
-```
-
-The input models reject provider query languages and bound page size to 100 and source documents to
-1 MiB. Result payloads are detached and immutable; `model_dump()` returns JSON-compatible copies.
-`SearchOperationError` provides a bounded public message and explicit retry hint. Adapters must not
-place credentials, provider response bodies, or raw SDK exception text in those messages.
-
-This package is pre-alpha and is not a published or stable release. It supports Python 3.11 through
-3.14.
-
-## Production validation
-
-Validate startup/shutdown cleanup, timeout and cancellation behavior, concurrency and payload bounds where applicable, secret rotation and least-privilege access, data durability, backup/restore, and failover against the selected provider. Do not infer distributed or durable guarantees from an in-process API or fake-client tests.
+This package's local contract tests use no search service. Passing them does not validate a live
+provider, a production topology, or hosted CI.

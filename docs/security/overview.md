@@ -1,17 +1,34 @@
 # Orbit Search: security
 
-## Package-specific security guidance
+This package validates and bounds search inputs and result documents. It does not authenticate
+callers, authorize collections, apply tenant isolation, encrypt transport, or protect a provider
+endpoint. Those controls belong to the application and the selected provider adapter.
 
-The README does not define separate package-specific security guarantees. Follow the implemented API and provider documentation; do not infer security properties that are not documented and tested.
+## Application and provider responsibilities
 
-## Credentials and sensitive data
+- Derive tenant and authorization filters from trusted identity or server-side policy. Do not accept
+  a client-supplied tenant filter as proof of access.
+- Enforce collection-level authorization before calling `SearchStore.search`.
+- Give provider credentials only the index and actions required by the application. Keep credentials
+  in a secret manager and rotate them according to the provider's policy.
+- Use TLS with certificate verification for remote providers and apply network restrictions where
+  appropriate.
+- Configure provider timeouts and concurrency bounds so slow queries cannot exhaust application
+  resources.
 
-Use least-privilege credentials and a secret manager for provider secrets. Do not commit secrets, tokens, private keys, personal data, request bodies, raw provider errors, or opaque cursors. Enable TLS certificate verification for remote services unless package documentation gives a narrowly scoped local-development exception.
+## Data handling
 
-## Vulnerability disclosure
+Search text, filters, cursors, identifiers, scores, and document source may contain sensitive data.
+Avoid logging full queries, opaque cursors, result documents, provider responses, or credentials.
+Prefer request IDs and bounded error categories for operational logs. `SearchOperationError` accepts
+only a bounded printable message; adapters must not pass raw SDK exception text into it.
 
-Follow the repository [security policy](../../SECURITY.md). Do not post vulnerability details in public issues. The policy describes private reporting alternatives without claiming that a hosting-platform setting is enabled.
+The contract rejects provider DSL, control characters in query text and cursors, non-finite numeric
+values, unsupported source values, and oversized or deeply nested documents. These are input and
+resource bounds, not a defense against every provider-specific injection or authorization flaw.
+Adapters must use provider APIs that bind or safely encode query values.
 
-## Limits
+## Disclosure
 
-This page records source and package documentation, not an independent security audit. Validate the package, its provider SDKs, and its deployment configuration before production use.
+Follow the repository [security policy](../../SECURITY.md) for vulnerability reporting. Do not post
+unfixed vulnerability details in public issues.
